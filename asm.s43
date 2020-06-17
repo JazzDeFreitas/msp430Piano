@@ -1,0 +1,277 @@
+;---------------------- Register Guide -----------------------------------------
+;                       R4: current note
+;                       R5: note timer
+;                       R6: song timer
+;                       R7: song pointer
+;                       R8: song mode
+;-------------------------------------------------------------------------------
+#include "msp430.h"
+                NAME    main            ; module name
+                PUBLIC  main            ; make the main label visible outside
+                                        ; this module
+                RSEG    DATA16_ID       ; define song note array
+ode:            DC8     0ah,0,0ah,0,0bh,0,0dh,0,0dh,0,0bh,0,0ah,0,8,0,6,0,6,0,8,0,0ah,0,0ah,0,0,8,8,0,0,0,0ah,0,0ah,0,0bh,0,0dh,0,0dh,0,0bh,0,0ah,0,8,0,6,0,6,0,8,0,0ah,0,8,0,0,6,6,0,0,0,8,0,8,0,0ah,0,6,0,8,0,0ah,0bh,0ah,0,6,0,8,0,0ah,0bh,0ah,0,8,0,6,0,8,0,1,0,0,0,0ah,0,0ah,0,0bh,0,0dh,0,0dh,0,0bh,0,0ah,0,8,0,6,0,6,0,8,0,0ah,0,8,0,0,6,6,0,0,0,0fh
+
+                RSEG    CSTACK          ; pre-declaration of segment
+                RSEG    CODE            ; place program in 'CODE' segment
+main:
+RESET:          mov.w   #SFE(CSTACK),SP ; initialize stackpointer
+                mov.w   #WDT_MDLY_0_064, &WDTCTL    ; WDT ~27ms interval timer
+                bis.b   #WDTIE, &IE1    ; enable WDT interrupt
+                
+                mov.b   #41h, &P1DIR    ; P1.0 and P1.6 output
+                
+                mov.b   #0, &P1SEL      ; set P1.1-5&7 to GPIO
+                mov.b   #0, &P1SEL2
+                mov.b   #0BEh, &P1REN   ; set P1.1-5&7 pull-up resistor
+                mov.b   #0, &P1IFG      ; clear P1.1-5&7 interrupt flag
+                mov.b   #0BEh, &P1IE    ; P1.1-5&7 Interrupt Enable
+                
+                mov.b   #0, &P2SEL      ; set P2.0-7 to GPIO
+                mov.b   #0, &P2SEL2
+                mov.b   #0FFh, &P2REN   ; set P2.0-7 pull-up resistor
+                mov.b   #0, &P2IFG      ; clear P2.0-7 interrupt flag
+                mov.b   #0FFh, &P2IE    ; P2.0-7 Interrupt Enable
+                
+                bis.w   #LPM0+GIE, SR   ; Enter LPM0, enable interrupts
+
+                mov.w   #0, R8          ; set song mode to off
+                mov.w   #0, R7          ; set song pointer to 0
+
+                jmp     $               ; jump to current location
+                
+;---------------------- Interrupt Service Routines -----------------------------
+
+;-------------------------------------------------------------------------------
+WDT_ISR:        ; Watchdog Timer ISR
+;-------------------------------------------------------------------------------
+                cmp     #1, R8          ; check to see if song mode is activated
+                jnz     note            ; if not, jump to note parser
+
+                cmp     #80, R6         ; this code puts a little gap between
+                jnz     continue1       ; each note
+                mov.w   #0, R4
+                
+continue1:      cmp     #0, R6          ; check to see if song timer is at 0
+                jnz     songDone        ; if not, decrement song timer and
+                                        ; continue to note parser
+                
+                mov.b   ode(R7), R4     ; move next song note into note register
+                cmp     #0fh, R4
+                jnz     continue2
+                
+                mov.w   #0, R8
+                bic.b   #BIT6, &P1OUT   ; turn song light off
+                jmp     note
+
+continue2:      inc     R7              ; increment song note pointer
+                mov.w   #800h, R6       ; reset song timer
+                
+songDone:       dec.w   R6              ; decrement song timer
+                
+
+note:           cmp     #0, R5          ; check to see if note timer is at 0
+                jnz     done            ; if not, decrement note timer and jump
+                                        ; to WDT_ISR end
+                
+                cmp     #1, R8          ; check to see if song mode is activated
+                jz      none            ; if so, skip note release code
+                
+                cmp.b   #11111111b, &P2IN ; note release code (checks to see if
+                jnz     c                 ; any buttons are being pressed;
+                cmp.b   #10111110b, &P1IN ; if not, stop playing notes)
+                jnz     stop1
+                jmp     stop2
+stop1:          cmp.b   #10111111b, &P1IN
+                jnz     c
+stop2:          mov.w   #0h, R4
+
+
+none:           cmp     #0h, R4         ; if note register reads 0, play no note
+                jnz     c               ; move 32 into timer and jump to end
+                mov.w   #32, R5
+                jmp     done
+                
+c:              xor.b   #1h, &P1OUT     ; toggle speaker output
+                
+                cmp     #1h, R4         ; if note register reads 1, play c by
+                jnz     csh             ; moving 32 into timer and jump to end
+                mov.w   #32, R5
+                jmp     done
+                
+csh:            cmp     #2h, R4         ; if note register reads 2, play csh by
+                jnz     d               ; moving 30 into timer and jump to end
+                mov.w   #30, R5
+                jmp     done
+                
+d:              cmp     #3h, R4         ; if note register reads 3, play d by
+                jnz     dsh             ; moving 28 into timer and jump to end
+                mov.w   #28, R5
+                jmp     done
+                
+dsh:            cmp     #4h, R4         ; if note register reads 4, play dsh by
+                jnz     e               ; moving 27 into timer and jump to end
+                mov.w   #27, R5
+                jmp     done
+                
+e:              cmp     #5h, R4         ; if note register reads 5, play e by
+                jnz     f               ; moving 25 into timer and jump to end
+                mov.w   #25, R5
+                jmp     done
+                
+f:              cmp     #6h, R4         ; if note register reads 6, play f by
+                jnz     fsh             ; moving 24 into timer and jump to end
+                mov.w   #24, R5
+                jmp     done
+                
+fsh:            cmp     #7h, R4         ; if note register reads 7, play fsh by
+                jnz     g               ; moving 22 into timer and jump to end
+                mov.w   #22, R5
+                jmp     done
+                
+g:              cmp     #8h, R4         ; if note register reads 8, play g by
+                jnz     gsh             ; moving 21 into timer and jump to end
+                mov.w   #21, R5
+                jmp     done
+                
+gsh:            cmp     #9h, R4         ; if note register reads 9, play gsh by
+                jnz     a               ; moving 20 into timer and jump to end
+                mov.w   #20, R5
+                jmp     done
+                
+a:              cmp     #0ah, R4        ; if note register reads a, play a by
+                jnz     ash             ; moving 19 into timer and jump to end
+                mov.w   #19, R5
+                jmp     done
+                
+ash:            cmp     #0bh, R4        ; if note register reads b, play ash by
+                jnz     b               ; moving 18 into timer and jump to end
+                mov.w   #18, R5
+                jmp     done
+                
+b:              cmp     #0ch, R4        ; if note register reads c, play b by
+                jnz     c2              ; moving 17 into timer and jump to end
+                mov.w   #17, R5
+                jmp     done
+                
+c2:             mov.w   #16, R5         ; if only c2 is left, play c2 by moving
+                                        ; 16 into timer
+
+done:           dec.w   R5              ; decrement note timer
+                reti                    ; return from WDT_ISR
+
+;------------------------------------------------------------------------------- 
+P1_ISR:         ; Port 1 ISR
+;-------------------------------------------------------------------------------
+                mov.w   #0, R8          ; if any note is pressed, cancel song
+                bic.b   #BIT6, &P1OUT   ; and turn song light off
+
+cbut:           bit.b   #BIT1, &P1IFG   ; if c button is pressed, clear input
+                jz      cshbut          ; flag and move 1 into note register
+                mov.w   #1h, R4
+                bic.b   #BIT1, &P1IFG
+                jmp     P1Done          ; jump to end of P1_ISR
+                
+cshbut:         bit.b   #BIT2, &P1IFG   ; if csh button is pressed, clear input
+                jz      dbut            ; flag and move 2 into note register
+                mov.w   #2h, R4
+                bic.b   #BIT2, &P1IFG
+                jmp     P1Done          ; jump to end of P1_ISR
+                
+dbut:           bit.b   #BIT3, &P1IFG   ; if d button is pressed, clear input
+                jz      dshbut          ; flag and move 3 into note register
+                mov.w   #3h, R4
+                bic.b   #BIT3, &P1IFG
+                jmp     P1Done          ; jump to end of P1_ISR
+                
+dshbut:         bit.b   #BIT4, &P1IFG   ; if dsh button is pressed, clear input
+                jz      ebut            ; flag and move 4 into note register
+                mov.w   #4h, R4
+                bic.b   #BIT4, &P1IFG
+                jmp     P1Done          ; jump to end of P1_ISR
+                
+ebut:           bit.b   #BIT5, &P1IFG   ; if e button is pressed, clear input
+                jz      fbut            ; flag and move 5 into note register
+                mov.w   #5h, R4
+                bic.b   #BIT5, &P1IFG
+                jmp     P1Done          ; jump to end of P1_ISR
+                
+fbut:           bit.b   #BIT7, &P1IFG   ; if f button is pressed, clear input
+                jz      P1Done          ; flag and move 6 into note register
+                mov.w   #6h, R4
+                bic.b   #BIT7, &P1IFG
+                
+P1Done:         reti
+
+;------------------------------------------------------------------------------- 
+P2_ISR:         ; Port 2 ISR
+;------------------------------------------------------------------------------- 
+                mov.w   #0, R8          ; if any note is pressed, cancel song
+                bic.b   #BIT6, &P1OUT   ; and turn song light off
+
+fshbut:         bit.b   #BIT0, &P2IFG   ; if fsh button is pressed, clear input
+                jz      gbut            ; flag and move 7 into note register
+                mov.w   #7h, R4
+                bic.b   #BIT0, &P2IFG
+                jmp     P2Done          ; jump to end of P2_ISR
+                
+gbut:           bit.b   #BIT1, &P2IFG   ; if g button is pressed, clear input
+                jz      gshbut          ; flag and move 8 into note register
+                mov.w   #8h, R4
+                bic.b   #BIT1, &P2IFG
+                jmp     P2Done          ; jump to end of P2_ISR
+
+gshbut:         bit.b   #BIT2, &P2IFG   ; if gsh button is pressed, clear input
+                jz      abut            ; flag and move 9 into note register
+                mov.w   #9h, R4
+                bic.b   #BIT2, &P2IFG
+                jmp     P2Done          ; jump to end of P2_ISR
+ 
+abut:           bit.b   #BIT3, &P2IFG   ; if a button is pressed, clear input
+                jz      ashbut          ; flag and move a into note register
+                mov.w   #0ah, R4
+                bic.b   #BIT3, &P2IFG
+                jmp     P2Done          ; jump to end of P2_ISR
+                
+ashbut:         bit.b   #BIT4, &P2IFG   ; if ash button is pressed, clear input
+                jz      bbut            ; flag and move b into note register
+                mov.w   #0bh, R4
+                bic.b   #BIT4, &P2IFG
+                jmp     P2Done          ; jump to end of P2_ISR
+                
+bbut:           bit.b   #BIT5, &P2IFG   ; if b button is pressed, clear input
+                jz      c2but           ; flag and move c into note register
+                mov.w   #0ch, R4
+                bic.b   #BIT5, &P2IFG
+                jmp     P2Done          ; jump to end of P2_ISR
+                
+c2but:          bit.b   #BIT6, &P2IFG   ; if c2 button is pressed, clear input
+                jz      songbut         ; flag and move d into note register
+                mov.w   #0dh, R4
+                bic.b   #BIT6, &P2IFG
+                jmp     P2Done          ; jump to end of P2_ISR
+                
+songbut:        bit.b   #BIT7, &P2IFG   ; if song button is pressed, turn song
+                jz      P2Done          ; mode on, start song pointer at 0,
+                mov.w   #0, R7          ; clear input flag and turn
+                mov.w   #1, R8          ; song light on
+                bis.b   #BIT6, &P1OUT
+                bic.b   #BIT7, &P2IFG
+                
+P2Done:         reti
+
+;---------------------- Interrupt Vectors --------------------------------------
+                COMMON  INTVEC                  
+                ORG     RESET_VECTOR    ; MSP430 RESET Vector
+                DW      RESET
+                
+                ORG     WDT_VECTOR      ; WDT Vector
+                DW      WDT_ISR
+                
+                ORG     PORT1_VECTOR    ; P1.x Vector
+                DW      P1_ISR
+                
+                ORG     PORT2_VECTOR    ; P2.x Vector
+                DW      P2_ISR
+                
+                END
